@@ -1,0 +1,44 @@
+---
+title: "Análisis de correspondencias"
+author: "Marina Ortín Fernández"
+date: "18/1/2020"
+output: html_document
+---
+
+---
+title: "Análisis de Correspondencias"
+author: "Marina Ortín Fernández"
+date: "18/1/2020"
+output: pdf_document
+---
+```{r}
+library(dplyr)
+library("FactoMineR")
+library("factoextra")
+setwd('C:/Users/marin/OneDrive/Escritorio/MDS/A_ EXAMENES/ARD/entregas')
+datos <- read.csv2('H1.csv', sep = ',')
+
+data <- select(datos,ReservedRoomType,DistributionChannel)
+chisq.test(data$ReservedRoomType,data$DistributionChannel)
+frecuencias <- table(data$DistributionChannel, data$ReservedRoomType)
+corresp <- CA(frecuencias,graph = FALSE)
+```
+# Información contenida en cada dimensión
+En este caso, en sólo 2 dimensiones se aglutina el 99% de la información. Se puede acceder a esta información a través de $eig, o gráficamente, a través de un Scree Plot
+```{r}
+corresp$eig
+fviz_screeplot(corresp, addlabels = TRUE, ylim = c(0, 50))
+```
+
+#Gráfico asimétrico
+Las flechas rojas representan columnas (habitación reservada) y las flechas azules, filas (canal de distribución).
+La distancia entre puntos del mismo color (mismo tipo de dato), representa su similaridad o disimilaridad. Por ejemplo, las habitaciones D,E,G y H se encuentran muy próximas entre sí, y presentan grandes diferencias con las habitaciones de tipo B.
+
+Si el ángulo entre flechas es agudo, las variables están fuertemente relacionadas entre filas y columnas.
+
+```{r}
+fviz_ca_biplot(corresp, map = "colgreen",
+               arrow = c(TRUE, TRUE)) +
+  ggtitle("Canal de distribución vs Habitación reservada")
+```
+

@@ -1,0 +1,247 @@
+---
+title: "Series temporales en predicción de reservas hoteleras"
+author: "Marina Ortín Fernández"
+date: "21/1/2020"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r echo=FALSE, include=FALSE}
+library(dplyr)
+library(cleandata)
+library(xts)
+library(ggplot2)
+library(forecast)
+library(data.table)
+library(ggfortify)
+library(aTSA)
+library(forecast)
+library(TSstudio)
+```
+
+# Datos
+```{r}
+setwd('C:/Users/marin/OneDrive/Escritorio/MDS/A_ EXAMENES/ARD/entregas')
+datos <- read.csv2('H1.csv', sep = ',')
+```
+
+Subset de los datos que me interesan para series temporales.
+```{r}
+timeSeriesDataSet <- select(datos,IsCanceled, LeadTime,ArrivalDateYear,ArrivalDateMonth,ArrivalDateWeekNumber,ArrivalDateDayOfMonth)
+```
+
+Transformación de los meses en números
+```{r echo=FALSE,include=FALSE}
+levels <- c('January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December')
+timeSeriesDataSet$ArrivalDateMonth = factor(timeSeriesDataSet$ArrivalDateMonth, order = TRUE , levels)
+x <- as.data.frame(timeSeriesDataSet$ArrivalDateMonth)
+timeSeriesDataSet$ArrivalDateMonth <- encode_ordinal(x, levels, none = '', out.int = FALSE, full_print = TRUE)
+timeSeriesDataSet$ArrivalDateMonth <- as.numeric(unlist(timeSeriesDataSet$ArrivalDateMonth))
+
+```
+# Desarrollo
+
+## Análisis exploratorio.
+### Ploteo
+#### Serie temporal inicial - check-ins al día
+Representación gráfica de los datos disponibles para acercarnos al problema.
+
+```{r}
+yearMonthDay <- function(y, m, d){
+  date <- paste(as.character(y),paste(m, d, sep = "-"), sep = "-")
+  date <- as.Date(date, "%Y-%m-%d")
+}
+arrival_date <- yearMonthDay(y = timeSeriesDataSet$ArrivalDateYear,
+                             m = timeSeriesDataSet$ArrivalDateMonth,
+                             d = timeSeriesDataSet$ArrivalDateDayOfMonth)
+
+arrival_date <- as.data.frame(arrival_date) 
+
+a = arrival_date %>% group_by(arrival_date) %>% summarise(n = n())
+data <- as.xts(a$n,order.by=as.Date(a$arrival_date))
+weekly <- apply.weekly(data,sum)
+weekly <- as.data.frame(weekly)
+
+#index of a dataframe to columns
+library(data.table)
+setDT(weekly, keep.rownames = TRUE)[]
+weekly$rn <- as.Date(weekly$rn)
+arrivalDatePlot <- weekly
+
+```
+
+##### Objeto TS
+```{r}
+checkins <- ts(weekly, start = 2015, frequency = 52)
+```
+
+```{r}
+autoplot(checkins[,"V1"]) +
+  ggtitle("Número de check-in por día") +
+  xlab("Year") +
+  ylab("Reservas")
+```
+Observaciones:
+* La serie parece tener una leve **tendencia** positiva (aumento o disminución a largo plazo de los datos)
+* Se aprecia claramente **estacionalidad** (Variación debida a la época del año con frecuencia fija y conocida)
+* No parece desprenderse un comportamiento **cíclico** (fluctuaciones más largas que las cíclicas, sin frecuencia fija)
+
+#### Reservas recibidas al día.
+
+Sin embargo, el ejercicio planteado requiere el cálculo de **cuántas reservas se realizarán al día**, no cuántos check-in se recibirán. Por lo tanto, y dado que existe, en anticipación en la reserva - que en algunos casos supera el año - debemos hacer una transformación de los datos utilizados.
+Calculamos el día de reserva por diferencia entre el día en que se realiza el check in y los días de antelación con los que se realizó la reserva.
+
+- ReservationDate = ArrivalDate - LeadTime
+```{r}
+yearMonthDay <- function(y, m, d){
+  date <- paste(as.character(y),paste(m, d, sep = "-"), sep = "-")
+  date <- as.Date(date, "%Y-%m-%d")
+}
+arrival_date <- yearMonthDay(y = timeSeriesDataSet$ArrivalDateYear,
+                             m = timeSeriesDataSet$ArrivalDateMonth,
+                             d = timeSeriesDataSet$ArrivalDateDayOfMonth)
+reservationDate <- arrival_date - timeSeriesDataSet$LeadTime
+reservationDate <- as.data.frame(reservationDate) 
+
+# reservationDate <- reservationDate%>%rename( 'reservationDate' = 'arrival_date' )
+
+         
+a = reservationDate %>% group_by(reservationDate) %>% summarise(n = n())
+data <- as.xts(a$n,order.by=as.Date(a$reservationDate))
+weekly <- apply.weekly(data,sum)
+weekly <- as.data.frame(weekly)
+
+#index of a dataframe to columns
+library(data.table)
+setDT(weekly, keep.rownames = TRUE)[]
+weekly$rn <- as.Date(weekly$rn)
+reservationDatePlot <- weekly
+
+```
+##### Objeto TS
+```{r}
+y <- ts(weekly, start = 2013, frequency = 52)
+```
+```{r}
+autoplot(y[,"V1"]) +
+  ggtitle("Número de reservas por día") +
+  xlab("Year") +
+  ylab("Reservas")
+```
+* La serie parece presentar **tendencia** positiva (aumento a largo plazo de los datos)
+* Se aprecia claramente **estacionalidad** (Variación debida a la época del año con frecuencia fija y conocida)
+
+
+```{r}
+ggsubseriesplot(y[,"V1"]) +
+  ylab("número de reservas") +
+  ggtitle("Seasonal subseries plot: reservas por fecha")
+```
+Las líneas horizontales azules indican las medias para cada semana. Como se observa, la media cambia a lo largo de las semanas.
+
+
+### Descomposición de la serie
+
+```{r}
+y[,"V1"] %>% 
+  stl(t.window=52, s.window="periodic", robust=TRUE) %>%
+  autoplot()
+```
+
+Se confirma que existe una tendencia positiva y parece existir una estacionalidad. Realizamos un análisis de frecuencias para ver si existe estacionalidad inferior al año.
+##### Componente estacional
+```{r}
+ggfreqplot(y[,"V1"], freq=4,nrow=1,facet.labeller=c("1T","2T","3T","4T"))+ggtitle("Comportamiento trimestral ")+theme_bw()
+```
+Del gráfico anterior se desprende que no existe estacionalidad.
+##### Residual
+Así como la correlación mide el alcance de una relación lineal entre dos variables, la autocorrelación mide la relación lineal entre valores rezagados de una serie de tiempo. 
+```{r}
+ggAcf(y[,"V1"])+ggtitle('ACF')
+```
+Las líneas azules discontinuas indican si las correlaciones son significativamente diferentes de cero.
+
+Cuando los datos tienen una tendencia, las autocorrelaciones para pequeños rezagos tienden a ser grandes y positivas porque las observaciones cercanas en el tiempo también son cercanas en tamaño. Por lo tanto, el ACF de las series temporales con tendencia tiende a tener valores positivos que disminuyen lentamente a medida que aumentan los retrasos.
+
+Cuando los datos son estacionales, las autocorrelaciones serán mayores para los rezagos estacionales (en múltiplos de la frecuencia estacional) que para otros rezagos.
+
+Cuando los datos tienen tendencia y son estacionales, verá una combinación de estos efectos.
+
+La disminución en el ACF a medida que aumentan los retrasos se debe a la tendencia, mientras que la forma "festoneada" se debe a la estacionalidad.
+
+```{r}
+ggPacf(y[,"V1"])+ggtitle('PACF')
+```
+
+## Modelo
+
+```{r}
+split_data <- ts_split(ts.obj = y[,"V1"], sample.out = 20)
+
+training <- split_data$train
+testing <- split_data$test
+
+```
+### ARIMA
+### Entrenamiento
+
+```{r}
+fit <- auto.arima(training,seasonal = FALSE, stepwise = FALSE, approximation = FALSE)
+summary(fit)
+```
+El test Ljung-Box devuelve un p-valor = 0.9442 por lo que se puede aceptar la hipótesis de independencia de los lags especificados; en este caso, 28.
+```{r}
+checkresiduals(fit)
+```
+A través de autoarima, estableciendo parámetros correspondientes, obtenemos un (2,1,2).
+Comprobamos los residuos y vemos que, salvo un rezago aislado, no parecen ser significativos; por lo tanto nos encontrariamos ante la presencia de ruido blanco.
+Obtenemos un índice para el test Ljung-Box de 0.94
+
+### Predicción
+```{r}
+arima.pred <- forecast::forecast(fit,h =20)
+autoplot(arima.pred)+theme_bw()
+```
+
+### Medida de error
+```{r}
+accuracy(arima.pred,testing)
+```
+
+
+```{r}
+autoplot(y[,"V1"])+theme_bw() + autolayer(arima.pred,alpha = 0.4) + ylab('Número de reservas') + xlab('año')
+```
+
+## ETS
+
+### Entrenamiento
+```{r echo=FALSE,include=FALSE}
+fit_ets <- ets(training)
+summary(fit_ets)
+checkresiduals(fit_ets)
+```
+El test de Ljung-Box permite aceptar la hipótesis nula de independencia de lags
+
+
+
+### Predicción
+```{r}
+ets.pred <- forecast::forecast(fit_ets,h =20)
+autoplot(ets.pred)+theme_bw()
+```
+
+
+### Medida de error
+```{r}
+accuracy(ets.pred,testing)
+```
+
+```{r}
+autoplot(y[,"V1"])+theme_bw() + autolayer(ets.pred,alpha = 0.4, col = 'dodgerblue3') +ylab('Número de reservas') + xlab('año')
+```
+
+# Bibliografía
+Hyndman, R. and Athanasopoulos, G. (2013). Forecasting: Principles and Practice.
+https://otexts.com/fpp2/arima-ets.html

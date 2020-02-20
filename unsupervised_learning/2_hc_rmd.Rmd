@@ -1,0 +1,272 @@
+---
+title: "Métodos Jerarquicos"
+author: '@marinaortin'
+date: "16/1/2020"
+output:
+  html_document:
+    df_print: paged
+---
+# Working directory & data
+```{r}
+setwd('C:/Users/marin/OneDrive/Escritorio/MDS/A_ EXAMENES/ARD/entregas')
+datos <- read.csv2('H1.csv', sep = ',')
+```
+# Libraries
+```{r echo=FALSE}
+
+library(tidyverse)
+library(dplyr)
+library(skimr)
+library(cleandata)
+library(onehot)
+library(cluster)
+library(ggplot2)
+library(reshape2)
+library(purrr)
+library(dplyr)
+library(dendextend)
+library(fpc)
+library(factoextra)
+
+```
+# Métodos jerárquicos
+```{r}
+str(datos) #sanity check
+
+sapply(datos,function(x) sum(is.na(x))) #NA check
+
+head(datos)
+tail(datos)
+
+skim(datos) #check distribution of data
+table(datos$IsCanceled) 
+#se trata de un dataset desbalanceado. Esperábamos este resultado
+#ya que tiene sentido que haya menos cancelaciones que reservas sin anomalías.
+#Dado que el dataset tiene un tamaño considerable, dada la capacidad de cómputo de la
+#que se dispone, se realiza un muestreo para trabajar, comprobando que se respeta, 
+#aproximadamente, esta proporción de 72%(0)-28% (1)
+
+# DATA WRANGLING
+## conversión en tipo de datos correcto
+
+### como numérico
+
+datos$ADR <- as.numeric(datos$ADR)
+datos$Company <- as.numeric(ifelse(datos$Company == "NULL", 0, datos$Company))
+datos$Agent <- as.numeric(ifelse(datos$Agent == "NULL", 0, datos$Agent))
+datos$companyFlag <- as.numeric(ifelse(datos$Company == "NULL", 0, 1))
+datos$agentFlag <- as.numeric(ifelse(datos$Agent == "NULL", 0, 1))
+
+### como factor
+datos$IsRepeatedGuest <- as.factor(datos$IsRepeatedGuest)
+datos$IsCanceled <- as.factor(datos$IsCanceled)
+
+skim(datos)
+
+set.seed(123)
+ndata1 <- sample_n(datos,1000)
+
+ndata <- select(ndata1,-IsCanceled,-ArrivalDateYear,-ReservationStatus,-ReservationStatusDate)
+ndatay <- select(ndata1,IsCanceled)
+table(ndata1$IsCanceled) # representativo del dataset original. Ok! :)
+```
+```{r}
+#Test de Hopkins
+library(clustertend)
+
+```
+
+
+# Método jerárquico
+## Matriz de disimilitud
+Utilizaremos la métrica de Gower, para poder medir distancias entre variables numéricas y categóricas. Utilizamos esta función a través de la función daisy del paquete cluster.
+```{r}
+gower.dist <- daisy(ndata, metric = c( "gower")) 
+
+```
+## Métodos: Divisivo y aglomerativo
+
+Existen dos tipos de métodos jerárquicos:
+* Divisivos: consideran el dataset un único clúster, y genera subgrupos en función de las distancias entre observaciones. Se suele utilizar para detectar clusters *grandes*.
+
+* Aglomerativos: consideran cada observación un clúster diferente, y las agrupa en función de sus distancias relativas. Se suele utilizar para detectar clusters más pequeños, y es el método utilizado por la mayoría de software. En este ejercicio, utilizaremos ambos para contrastar los resultados arrojados por ambos métodos.
+
+### Método divisivo: DIANA
+Utilizamos la función DIANA, combinada con la matriz de distancias y métrica Gower calculada en el apartado anterior. 
+Representamos gráficamente los resultados como aproximación inicial:
+```{r}
+divisive.clust <- diana(as.matrix(gower.dist), diss = TRUE, keep.diss = TRUE) 
+plot(divisive.clust, main = "Divisive")
+```
+### Método aglomerativo
+Realizamos la separación en clusters y representamos gráficamente, para obtener una aproximación inicial al modelo y comparar resultados con el método anterior.
+
+```{r}
+aggl.clust.c <- hclust(gower.dist, method = "complete") 
+plot(aggl.clust.c, main = "Agglomerative, complete linkage ",)
+
+```
+
+### Determinación del número de clúster.
+
+En los métodos jerárquicos, juega un papel fundamental el criterio del científico de datos a la hora de determinar el número óptimo de clústers.Sin embargo, es necesario recordar que las características deseables en un cluster son principalmente, dos:
+
+* Compactness: minimización de la distancia entre observaciones dentro del mismo cluster; es decir, que las observaciones que pertenezcan a un mismo cluster estén cerca entre sí.
+
+* Separación entre clústers: maximización de la distancia entre grupos, para propiciar una correcta diferenciación entre clusters y evitar superposiciones.
+
+En este ejercicio, nos valdremos de dos técnicas:
+
+* Elbow method: mide si los grupos son compactos; es decir, si las observaciones dentro del grupo están cerca entre sí. En la representación visual, elegiremos el número de clúster que genere el 'codo' que da nombre a esta técnica.
+
+* Silhouette: mide la separación entre clusters; por lo tanto, seleccionaremos aquel número de grupos que maximice esta distancia
+
+Dado que los objetivos de estas dos técnicas persiguen objetivos diferentes, es probable que el número óptimo de clústers difiera, según la técnica utilizada, por lo que se refuerza la idea de la importancia del criterio del científico de datos, que debe tomar en cuenta cuál es el objetivo de la segmentación realizada, y qué criterio priorizará.
+
+En este ejercicio, y para mayor información a la hora de tomar la decisión de número óptimo de clústers, hemos tomado en cuenta otras métricas, que reflejamos a continuación, así como la distribución de las observaciones por clusters, según método divisivo y aglomerativo.
+```{r echo=FALSE}
+cstats.table <- function(dist, tree, k) {
+  clust.assess <- c("cluster.number","n","within.cluster.ss","average.within","average.between",
+                    "wb.ratio","dunn2","avg.silwidth")
+  clust.size <- c("cluster.size")
+  stats.names <- c()
+  row.clust <- c()
+  output.stats <- matrix(ncol = k, nrow = length(clust.assess))
+  cluster.sizes <- matrix(ncol = k, nrow = k)
+  for (i in c(1:k)) {
+    row.clust[i] <- paste("Cluster-", i, " size")
+  }
+  for (i in c(2:k)) {
+    stats.names[i] <- paste("Test", i - 1)
+    
+    for (j in seq_along(clust.assess)) {
+      output.stats[j, i] <- unlist(cluster.stats(d = dist, clustering = cutree(tree, k = i))[clust.assess])[j]
+      
+    }
+    
+    for (d in 1:k) {
+      cluster.sizes[d, i] <- unlist(cluster.stats(d = dist, clustering = cutree(tree, k = i))[clust.size])[d]
+      dim(cluster.sizes[d, i]) <- c(length(cluster.sizes[i]), 1)
+      cluster.sizes[d, i]
+      
+    }
+  }
+  output.stats.df <- data.frame(output.stats)
+  cluster.sizes <- data.frame(cluster.sizes)
+  cluster.sizes[is.na(cluster.sizes)] <- 0
+  rows.all <- c(clust.assess, row.clust)
+  
+  # rownames(output.stats.df) <- clust.assess
+  output <- rbind(output.stats.df, cluster.sizes)[ ,-1]
+  colnames(output) <- stats.names[2:k]
+  rownames(output) <- rows.all
+  is.num <- sapply(output, is.numeric)
+  output[is.num] <- lapply(output[is.num], round, 2)
+  output
+}
+```
+#### Métricas para método divisivo. Hasta 7 clusters.
+```{r}
+stats.df.divisive <- cstats.table(gower.dist, divisive.clust, 7)
+stats.df.divisive
+```
+#### Métricas para método aglomerativo Hasta 7 clusters.
+```{r}
+stats.df.aggl <- cstats.table(gower.dist, aggl.clust.c, 7) 
+stats.df.aggl
+```
+
+De estas métricas se desprende, como ya podíamos anticipar, que a mayor número de cluster, se reduce la media de distancias entre observaciones (average.within) y por tanto, ofrece mejor 'compactness'. La media de distancia entre cluster (average.between) no sufre una gran variación al aumentar el número de clusters, aunque tiene una ligera tendencia descendente.
+
+#### Determinación número de clústers: Método divisivo
+##### Elbow
+Del gráfico parece desprenderse que, el número óptimo de clústers, utilizando el método del codo, en un clustering jerárquico divisivo es cuatro.
+```{r}
+ggplot(data = data.frame(t(cstats.table(gower.dist, divisive.clust, 15))), 
+       aes(x = cluster.number, y = within.cluster.ss)) + 
+  geom_point() +
+  geom_line() +
+  ggtitle("Divisive clustering") +
+  labs(x = "Num.of clusters", y = "Within clusters sum of squares (SS)") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+##### Silhouette
+Utilizando esta técnica, parece que el número óptimo de clústers es 2, en el método jerárquico divisivo, es 2.
+```{r}
+ggplot(data = data.frame(t(cstats.table(gower.dist, divisive.clust, 15))), 
+       aes(x = cluster.number, y = avg.silwidth)) + 
+  geom_point() +
+  geom_line() +
+  ggtitle("Divisive clustering") +
+  labs(x = "Num.of clusters", y = "Average silhouette width") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+#### Determinación número de clústers: Método aglomerativo
+##### Elbow
+Aplicando la técnica del codo, en la vertiente de clústering jerárquico aglomerativa, encontramos que el número óptimo de clústers es 4.
+
+```{r}
+ggplot(data = data.frame(t(cstats.table(gower.dist, aggl.clust.c, 15))), 
+       aes(x = cluster.number, y=within.cluster.ss)) + 
+  geom_point() +
+  geom_line() +
+  ggtitle("Agglomerative clustering") +
+  labs(x = "Num.of clusters", y = "Within clusters sum of squares (SS)") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+##### Silhouette
+La técnica de la silueta parece apuntar, en el método jerárquico aglomerativo, a un número óptimo de clústers igual a 2.
+```{r}
+ggplot(data = data.frame(t(cstats.table(gower.dist, aggl.clust.c, 15))), 
+       aes(x = cluster.number, y = avg.silwidth)) + 
+  geom_point() +
+  geom_line() +
+  ggtitle("Agglomerative clustering") +
+  labs(x = "Num.of clusters", y = "Average silhouette width") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+## Dendogramas
+A la luz de los resultados obtenidos previamente, y teniendo en cuenta la cuestión de negocio a la que se intenta dar respuesta, podríamos representar los dendogramas.
+Utilizaremos el número de clúster obtenidos en silhouette, ya que el objetivo es encontrar **grupos definidos y diferenciados** de clientes.
+
+### Dendograma clúster jerárquico aglomerativo con dos clúster.
+```{r}
+dendro <- as.dendrogram(aggl.clust.c)
+dendro.col <- dendro %>%
+  set("branches_k_color", k = 2, value =   c("darkslategray", "darkslategray4", "darkslategray3", "gold3", "darkcyan", "cyan3", "gold3")) %>%
+  set("branches_lwd", 0.6) %>%
+  set("labels_colors", 
+      value = c("darkslategray")) %>% set("labels_cex", 0.5)
+ggd1 <- as.ggdend(dendro.col)
+ggplot(ggd1, theme = theme_minimal()) + labs(x = "Num. observations", y = "Height", title = "Dendrogram, k = 2")
+
+```
+### Dendograma clúster jerárquico divisivo con dos clúster.
+```{r}
+dendro2 <- as.dendrogram(divisive.clust)
+dendro.col <- dendro2 %>%
+  set("branches_k_color", k = 2, value =   c("darkslategray", "darkslategray4", "darkslategray3", "gold3", "darkcyan", "cyan3", "gold3")) %>%
+  set("branches_lwd", 0.6) %>%
+  set("labels_colors", 
+      value = c("darkslategray")) %>% set("labels_cex", 0.5)
+ggd2 <- as.ggdend(dendro.col)
+ggplot(ggd2, theme = theme_minimal()) + labs(x = "Num. observations", y = "Height", title = "Dendrogram, k = 2")
+```
+## Tabla de contingencia
+```{r}
+clust.num <- cutree(divisive.clust, k = 2)
+synthetic.customers.cl <- cbind(ndatay, clust.num)
+prop.table(table(synthetic.customers.cl$IsCanceled, synthetic.customers.cl$clust.num))*100
+
+```
+
+## Conclusiones
+
+El número óptimo de clústeres se encuentra entre 2 y 3.
+
+
+### Trabajo adicional propuesto. Posibles línas de investigación.
+Se propone realizar el análisis, utilizando como métrica la distancia de Gower, aplicada en métodos de clusterización no jerárquicos, y contrastar los resultados. Este trabajo se realizará en la siguiente sección del ejercicio.
+

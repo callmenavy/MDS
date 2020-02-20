@@ -1,0 +1,145 @@
+---
+title: "No jerárquicos"
+author: "Marina Ortín Fernández"
+date: "16/1/2020"
+output:
+  html_document:
+    df_print: paged
+---
+# Working directory & data
+```{r}
+setwd('C:/Users/marin/OneDrive/Escritorio/MDS/A_ EXAMENES/ARD/entregas')
+datos <- read.csv2('H1.csv', sep = ',')
+```
+# Libraries
+```{r echo=FALSE,include=FALSE}
+
+library(tidyverse)
+library(dplyr)
+library(skimr)
+library(cleandata)
+library(onehot)
+library(cluster)
+library(ggplot2)
+library(reshape2)
+library(purrr)
+library(dplyr)
+library(dendextend)
+library(fpc)
+library(Rtsne)
+
+```
+# Transformaciones
+```{r}
+str(datos) #sanity check
+
+sapply(datos,function(x) sum(is.na(x))) #NA check
+
+head(datos)
+tail(datos)
+
+skim(datos) #check distribution of data
+table(datos$IsCanceled) 
+#se trata de un dataset desbalanceado. Esperábamos este resultado
+#ya que tiene sentido que haya menos cancelaciones que reservas sin anomalías.
+#Dado que el dataset tiene un tamaño considerable, dada la capacidad de cómputo de la
+#que se dispone, se realiza un muestreo para trabajar, comprobando que se respeta, 
+#aproximadamente, esta proporción de 72%(0)-28% (1)
+
+# DATA WRANGLING
+## conversión en tipo de datos correcto
+
+### como numérico
+
+datos$ADR <- as.numeric(datos$ADR)
+datos$Company <- as.numeric(ifelse(datos$Company == "NULL", 0, datos$Company))
+datos$Agent <- as.numeric(ifelse(datos$Agent == "NULL", 0, datos$Agent))
+datos$companyFlag <- as.numeric(ifelse(datos$Company == "NULL", 0, 1))
+datos$agentFlag <- as.numeric(ifelse(datos$Agent == "NULL", 0, 1))
+
+### como factor
+datos$IsRepeatedGuest <- as.factor(datos$IsRepeatedGuest)
+datos$IsCanceled <- as.factor(datos$IsCanceled)
+
+skim(datos)
+
+set.seed(123)
+ndata1 <- sample_n(datos,1000)
+
+ndata <- select(ndata1,-IsCanceled,-ArrivalDateYear,-ReservationStatus,-ReservationStatusDate)
+ndatay <- select(ndata1,IsCanceled)
+table(ndata1$IsCanceled) # representativo del dataset original. Ok! :)
+```
+# Método no jerárquico
+Optamos por el método PAM, por ser un modelo robusto, poco sensible al ruido y a los outliers. Adicionalmente, este método ofrece un "individuo tipo" de cada cluster, lo que permitirá caracterizar estos grupos, lo cual será extremadamente relevante para tomar decisiones de negocio y definir acciones de marketing diferenciadas por clúster,en función de los clientes y las necesidades diferenciadas de cada uno de ellos.
+
+## Matriz de disimilitud
+
+```{r}
+gower.dist <- daisy(ndata, metric = c( "gower")) 
+gower_mat <- as.matrix(gower.dist)
+```
+## Determinación de número de clusters óptimo.
+De acuerdo con este método, dado que el objetivo es la maximización de la silhouette Width, el número óptimo de clusters es 2.
+```{r}
+sil_width <- c(NA)
+for (i in 2:8){  
+  pam_fit <- pam(gower.dist, diss = TRUE, k = i)  
+  sil_width[i] <- pam_fit$silinfo$avg.width  
+}
+plot(1:8, sil_width,
+     xlab = "Number of clusters",
+     ylab = "Silhouette Width")
+lines(1:8, sil_width)
+```
+
+## Caracterización de clúster
+
+A través de las siguientes líneas de código extraemos las principales características de ambos clúster, con el objetivo de identificar patrones de comportamiento diferenciados, que permitan al departamento de marketing del hotel definir estrategias comerciales diferenciadas.
+De forma sintética, podríamos caracterizar los dos cluster como sigue:
+
+**Clúster 1**
+Se trata de clientes que visitan el hotel en época estival; eminentemente durante el mes de agosto. Se trata de estancias comparativamente más largas, en torno a los 5 días de media y que acceden a la reserva a través de agencias de viajes online, en su mayoría (61% de los casos).
+
+**Clúster 2**
+Este tipo de reservas es mucho más desestacionalizada, con una estancia más corta (en torno a los 3 días, de media), y son realizadas sin la intervención de una agencia de viajes, sino que es contratada de forma directa.
+
+Cabe señalar que existen puntos de confluencia entre ambos grupos: la distribución del tipo de habitación contratada es similar en ambos grupos, así como el tipo de cliente identificado que son, en su mayoria, 'Transient' o 'Transient Party'.
+
+```{r}
+k <- 2
+pam_fit <- pam(gower.dist, diss = TRUE, k)
+pam_results <- ndata %>%
+  mutate(cluster = pam_fit$clustering) %>%
+  group_by(cluster) %>%
+  do(the_summary = summary(.))
+pam_results$the_summary
+```
+```{r}
+tsne_obj <- Rtsne(gower.dist, is_distance = TRUE)
+tsne_data <- tsne_obj$Y %>%
+  data.frame() %>%
+  setNames(c("X", "Y")) %>%
+  mutate(cluster = factor(pam_fit$clustering))
+ggplot(aes(x = X, y = Y), data = tsne_data) +
+  geom_point(aes(color = cluster))
+```
+# Tabla de contingencia
+```{r}
+divisive.clust <- diana(as.matrix(gower.dist), diss = TRUE, keep.diss = TRUE) 
+clust.num <- cutree(divisive.clust, k = 2)
+synthetic.customers.cl <- cbind(ndatay, clust.num)
+round(prop.table(table(synthetic.customers.cl$IsCanceled, synthetic.customers.cl$clust.num),margin=2),3)*100
+
+
+chisq.test(synthetic.customers.cl$IsCanceled, synthetic.customers.cl$clust.num)
+#El p-valor está por debajo del nivel de significación (0.05) y por tanto podemos rechazar la hipótesis nula y concluir que las dos variables no son independientes.
+```
+
+# Conclusión.
+
+Como conclusión de este apartado, podemos señalar que se confirma la hipótesis planteada en el primer bloque del ejercicio, donde se apuntaba, a través de un método de clústering jerárquico hacia la segmentación en dos clusters de la población observada.
+
+Adicionalmente, se demuestra que existen características diferenciadoras de cada cluster, que podrían permitir un tratamiento diferenciado de los clientes en función de su pertenencia a uno u otro grupo.
+
+Por último, existe un comportamiento diferente entre los clúster 1 y 2, teniendo el sengundo una menor tasa de cancelación.

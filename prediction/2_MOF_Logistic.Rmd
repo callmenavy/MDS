@@ -1,0 +1,138 @@
+---
+title: "Regresión"
+author: "Marina Ortín Fernández"
+date: "19/1/2020"
+output: pdf_document
+---
+# GLM
+```{r}
+setwd('C:/Users/marin/OneDrive/Escritorio/MDS/A_ EXAMENES/ARD/entregas')
+source("unbalanced_functions.R")
+```
+
+```{r}
+library(caret)
+library(ROCR)
+library(broom)
+```
+
+## Separación de la muestra: Train y Test
+Para entrenar el modelo dividiremos la muestra en set de entrenamiento y set de validación. De esta forma, podremos cuantificar el índice de error alcanzado.
+```{r}
+numdatay <- cbind(IsCanceled,numdata)
+data <- numdatay
+set.seed(1234)
+n=nrow(numdatay)
+id_train <- sample(1:n , 0.80*n)
+data_train = numdatay[id_train,]
+data_test = numdatay[-id_train,]
+```
+
+## Comprobación de la distribución de la muestra en función de la variable objetivo.
+Comprobamos que el porcentaje de cancelaciones es similar en las muestras de entrenamiento y validación. Se trata de una distribución desbalanceada, con una proporción 70%-30% aproximadamente.
+### Training
+```{r}
+target <- as.data.frame(data_train %>% group_by(IsCanceled) %>% summarise(counts = n())) %>% mutate(perc = counts/nrow(data_train))
+ggplot(target, aes(x = IsCanceled, y = perc, fill = IsCanceled)) + geom_bar(stat = "identity") +
+  geom_text(aes(label = round(perc,2)))
+```
+### Testing
+```{r}
+target <- as.data.frame(data_test %>% group_by(IsCanceled) %>% summarise(counts = n())) %>% mutate(perc = counts/nrow(data_test))
+
+ggplot(target, aes(x = IsCanceled, y = perc, fill = IsCanceled)) + geom_bar(stat = "identity") + geom_text(aes(label = round(perc,2)))
+```
+# Entrenamiento del modelo
+```{r}
+
+model_glm <- glm( IsCanceled ~ . , data = data_train, family = binomial(logit) )
+summary_glm <- summary(model_glm)
+summary_glm
+```
+Atendiendo al p-valor, consideramos parámetros significativos aquellos que no superen p-valor =0.05.
+
+#Evaluación del modelo
+Evaluamos el desempeño del modelo y representamos gráficamente. Como podemos observar, ambas distribuciones se encuentran ligeramente desplazadas hacia la izquierda; esto se debe -como vimos anteriormente -a que la muestra de datos está desbalanceada. Se produce un 'arrastre' hacia la izquierda porque la mayoría de registros son negativos (no cancelaciones).
+
+Por lo tanto, y a la luz de los datos, concluimos que la accuracy no sería una buena medida de desempeño. Tomaremos la curva ROC para determinar el cut-off
+```{r}
+
+data_train$prediction <- predict( model_glm, newdata = data_train, type = "response" )
+data_test$prediction  <- predict( model_glm, newdata = data_test , type = "response" )
+
+# distribution of the prediction score grouped by known outcome
+ggplot( data_train, aes( prediction, color = as.factor(IsCanceled) ) ) + 
+geom_density( size = 1 ) +
+ggtitle( "Training Set's Predicted Score" )
+```
+```{r}
+accuracy_info <- AccuracyCutoffInfo( train = data_train, test = data_test, 
+                                     predict = "prediction", actual = "left" )
+
+```
+
+```{r}
+
+```
+
+#Elección de cut-off
+```{r}
+# Matriz de coste
+```{r}
+searchgrid = seq(0.0001,0.8, 0.001)
+result = cbind(searchgrid, NA)
+cost1 <- function(r, pi){
+  weight1 = 1
+  weight0 = 1
+  c1 = (r==1)&(pi<pcut) #(False Positive)
+  c0 = (r==0)&(pi>pcut) #(False Negative)
+  return(mean(weight1*c1+weight0*c0))
+}
+
+df.glm1 <- glm(IsCanceled~.,family = binomial,data_train)
+prob <- predict(df.glm1,type = "response")
+for (i in 1:length(searchgrid))
+{
+  pcut <- result[i,1]
+  #assign the cost to the 2nd col
+  result[i,2] <- cost1(data_train$IsCanceled, prob)
+}
+
+plot(result, ylab="Cost in Training Set")
+result[which.min(result[,2]),]
+
+#0.5921000  0.2430105
+```
+
+# CURVA ROC
+```{r}
+df.glm1<-glm(IsCanceled~.,family=binomial,data_train)
+prob.glm1.outsample <- predict(df.glm1,type="response",newdata = data_test)
+predicted.glm1.outsample <- (prob.glm1.outsample > 0.5921)
+predicted.glm1.outsample <- as.numeric(predicted.glm1.outsample)
+
+pred <- prediction(prob.glm1.outsample, data_test$IsCanceled)
+perf <- performance(pred, "tpr", "fpr")
+rocr.auc.lr = as.numeric(performance(pred, "auc")@y.values)
+
+plot(perf, colorize=TRUE,
+      main = 'ROC Curve')
+mtext(paste('Logistic Regression - auc : ', round(rocr.auc.lr, 5)))
+```
+# Interpretación
+Transformamos los coeficientes de los parámetros más importantes, en términos de probabilidad, para ser más interpretables.
+```{r}
+ 
+coefficient <- tidy(model_glm)[ , c( "term", "estimate", "statistic" ) ]
+
+# transfrom the coefficient to be in probability format 
+coefficient$estimate <- exp( coefficient$estimate )
+coefficient
+```
+```{r}
+unlist(slot(performance(pred, "auc"), "y.values"))
+```
+
+
+
+

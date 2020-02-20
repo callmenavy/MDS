@@ -1,0 +1,754 @@
+---
+title: "Examen fundamentos"
+author: "Marina Ortín Fernández"
+date: "4/2/2020"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r echo =FALSE, include=FALSE}
+# Librerías
+library(dplyr)
+library(skimr)
+library(ggplot2)
+library(viridis)
+library(ggpubr)
+```
+
+```{r echo=FALSE,include=FALSE}
+# Funciones
+plot_var <- function(n_y, n_x, desc_col, isContinous, topN = 0) {
+  #Plot function: Se recibe los parametros
+  #               * Y: Vector de la columna objetivo (igual longitud de eda_column)
+  #               * X: Vector de la columna que se realiza el analisis
+  #               * desc_column: descripcion de la variable a analizar, para fines de grafico
+  #               * topN: Si se tiene varias categorias seleccionar cuanto sera el top
+  data_plot <- data[, c(n_y, n_x)]
+  colnames(data_plot) <- c("Y", "Variable")
+  data_plot <-
+    data_plot  %>%  mutate_if(sapply(data_plot, is.character), as.factor)
+  #isContinous <- typeof(data_plot$Variable) %in% c("double", "numeric") #solo valores continuos
+  if (topN > 0) {
+    var.top.df <-
+      data_plot %>% group_by(Y, Variable) %>% tally() %>% top_n(topN)
+    var.top <- var.top.df$Variable
+    p2.df <- data_plot[data_plot$Variable %in% var.top, ]
+    p1.df <-
+      data_plot %>% group_by(Variable)  %>% summarise(n = n()) %>% top_n(topN) %>%
+      arrange(desc(Variable)) %>%
+      mutate(prop = round(n / sum(n), 3) * 100, 2) %>%
+      mutate(ypos = cumsum(prop) - 0.5 * prop)
+    p3.df <-
+      data_plot %>% group_by(Y, Variable) %>% tally() %>% top_n(topN)
+  } else {
+    p2.df <- data_plot
+    p1.df <-
+      data_plot %>% group_by(Variable)  %>% summarise(n = n()) %>%
+      arrange(desc(Variable)) %>%
+      mutate(prop = round(n / sum(n), 3) * 100, 2) %>%
+      mutate(ypos = cumsum(prop) - 0.5 * prop)
+    p3.df <- data_plot %>% group_by(Y, Variable) %>% tally()
+  }
+  if (isContinous) {
+    #******Variables Continuas*****
+    #******Histograma por Variable Target*****
+    p1 <- ggplot(data_plot, aes(Variable)) +
+      geom_histogram(bins = 20 , col = "black", aes(fill = ..count..)) +
+      scale_fill_viridis(discrete = FALSE) +
+      labs(x = desc_col) +
+      theme_classic()
+    #******Densidad por Variable Target*****
+    p2 <- ggplot(data_plot) +
+      geom_density(aes(x = Variable, fill = Y),
+                   alpha = 0.3,
+                   linetype = 0) +
+      scale_fill_viridis(discrete = TRUE) +
+      labs(x = desc_col) +
+      theme_classic() +
+      theme(legend.position = "bottom")
+    #******Boxplot por Variable Target*****
+    p3 <- ggboxplot(
+      data_plot,
+      x = "Y",
+      y = "Variable",
+      color = "Y",
+      shape = "Y",
+      alpha = 0.5,
+      ylab = "desc_col",
+      fill = "Y") +
+      scale_fill_viridis(discrete = TRUE) +
+      scale_color_viridis(discrete = TRUE)
+      ggarrange(p1,
+                ggarrange(p2, p3 , ncol = 2),
+                nrow = 2)
+  } else{
+    p1 <- ggplot(p1.df, aes(x = "", y = prop, fill = Variable)) +
+      geom_bar(stat = "identity",
+               width = 1,
+               color = "white") +
+      coord_polar("y", start = 0) +
+      theme_void() +
+      theme(legend.position = "left",
+            legend.text = element_text(size = 7),
+            legend.title = element_text(size = 8)
+            ) +
+      geom_text(aes(
+        y = ypos,
+        label = paste(prop, "%", sep = "")
+      ),
+      color = "white",
+      size = 3) +
+      scale_fill_viridis(discrete = TRUE)
+    #**Densidad por Variable Target**
+    p2 <- ggplot(p2.df) +
+      geom_density(
+        aes(x = Variable, fill = Y),
+        position = "stack",
+        alpha = 0.5,
+        linetype = 0
+      ) +
+      scale_fill_viridis(discrete = TRUE) +
+      labs(x = desc_col) +
+      theme_bw() +
+      theme(
+        legend.position = "none",
+        axis.title.y = element_text(size = 6),
+        axis.text.y = element_text(angle = 45, size = 7),
+        axis.title.x = element_text(size = 10),
+        axis.text.x = element_text(angle = 45, size = 7)
+      )
+    #**Bar plot by Target Variable**
+    p3 <-
+      ggplot(p3.df, aes(x = Variable, y = n, fill = Y)) +
+      geom_bar(stat = "identity") +
+      geom_text(
+        aes(label = n),
+        position = position_stack(vjust = 0.5),
+        color = "white",
+        size = 3
+      ) +
+      scale_fill_viridis(discrete = TRUE) +
+      labs(x = desc_col) +
+      theme_bw() +
+      theme(
+        legend.position = "bottom",
+        axis.title.y = element_text(size = 6),
+        axis.text.y = element_text(angle = 45, size = 7),
+        axis.title.x = element_text(size = 10),
+        axis.text.x = element_text(angle = 45, size = 7),
+        legend.title = element_blank(),#element_text(size = 8),
+        legend.text = element_text(size = 8)
+      )
+    ggarrange(ggarrange(p1, p2 , nrow = 2),p3,
+              ncol = 2)
+  }
+}
+```
+
+# Carga datos
+```{r}
+load('../easySHARE_rel7_0_0.rda')
+data <- easySHARE_rel7_0_0 %>% filter(wave == 6|wave == 7)
+```
+# PARTE 1.
+#### Limpieza
+1. Como vamos a comparar con CASP, eliminamos los -15 de esta variable, para poder extraer conclusiones. Equivale a valores ausentes en nuestra variable objetivo
+
+```{r}
+data <- data %>% filter(casp != -15)
+```
+2. Eliminamos los -10, por comparabilidad.
+Comprobamos la etiqueta -10 se encuentra en la misma linea.
+```{r}
+data %>% filter(ep036_mod == -10) %>% nrow
+data %>% filter(ep026_mod == -10) %>% nrow
+data %>% filter(ep013_mod == -10) %>% nrow
+data %>% filter(ep011_mod == -10) %>% nrow
+data %>% filter(ep009_mod == -10) %>% nrow
+data %>% filter(ep036_mod == -10 & ep026_mod == -10 & ep013_mod == -10 & ep011_mod == -10 & ep009_mod == -10) %>% nrow
+```
+
+
+```{r}
+data <- data %>% filter(ep009_mod != -10)
+```
+# Selección de variables:
+## Variable objetivo
+Se define la puntuación CASP como variable objetivo. El análisis exploratio realizado a continuación estará basado en el análisis del posible poder explicativo de cada variable predictora sobre la variable CASP.
+
+```{r}
+which(names(data) == "casp")
+```
+
+
+La variable objetivo es numérica. Como se puede observar, toma valores entre 12 y 48. Inicialmente existían valores -15 (valores ausentes) que han sido eliminados a efectos de análisis. La media toma valor 37,05 y la moda, 41.
+```{r}
+summary(data$casp)
+```
+
+```{r}
+typeof(data$casp)
+table(data$casp)
+```
+```{r}
+ggplot(data,aes(x =casp)) + geom_bar(fill = 'maroon4') +
+  ggtitle('Distribución de la variable objetivo: CASP-12')
+```
+
+
+## Work and Money
+### Variable 1: current job situation
+```{r}
+which(names(data) == "ep005_")
+```
+
+#### Descriptivo
+Esta variable presenta 8 niveles: los niveles 1 a 5 denotan el tipo de trabajo desempeñado, si existe. 
+Las variables 97, - 12 y -15 son categorías en las que se recoge otros estados poco habituales, aquellos que rechazan contestar o de los que no se tiene información, respectivamente.
+```{r}
+unique(data$ep005_)
+```
+
+```{r}
+data$ep005_ <- as.factor(data$ep005_)
+round(prop.table(table(data$ep005_))*100,2)
+```
+* -15: no information
+* -12: refusal : super importante
+* -10 sharelife interview
+* -9: not applicable
+
+
+
+####Ploteo
+
+```{r}
+plot_var(96,59,"CASP vs Current job situation",T,0)
+```
+### Variable 2: ep009_mod. Quién es el empleador.
+
+```{r}
+which(names(data) == "ep009_mod")
+```
+
+#### Descriptivo
+3 niveles según si es trabajo por cuenta ajena (1), empleado público (2) o autónomo (3) y tres niveles para denotar NAs (-9), rechaza responder (-12) o sin información (-15)
+
+Dado que la categoría mayoritaria es la de jubilados, las variables referentes a trabajo presentan un problema común: la mayoría de registros están catalogados bajo el factor -9 ('No aplica'), dado que el tipo de encuestado no puede responder a estas preguntas.
+```{r}
+unique(data$ep009_mod)
+round(prop.table(table(data$ep009_mod)),2)
+```
+
+Filtro por categoría -9 y compruebo el número de uniques
+
+```{r}
+cats9 <- data %>% filter(ep009_mod == -9)
+```
+```{r}
+unique(cats9$ep005_)
+```
+* -15 no information -> 127
+* -12 refusal -> solo 2 casos
+* 1: retired -> 46453 registros
+* 2: employed or self-employed (including working for family business)
+* 3: unemployed
+* 4: permanently sick or disabled
+* 5: homemaker
+* 97: other
+
+Peso relativo de cada una de estas variables
+```{r}
+table(cats9$ep005_)
+```
+```{r}
+data <- data %>% filter(ep009_mod != -10)
+```
+####Ploteo
+```{r}
+data$ep009_mod <- as.factor(data$ep009_mod)
+```
+
+
+```{r}
+plot_var(97,59,"CASP vs Employer",T,0)
+```
+### Variable 3: term of main job
+```{r}
+which(names(data) == "ep011_mod")
+```
+
+#### Descriptivo
+81% de NAs por problema descrito anteriormente.
+```{r}
+unique(data$ep011_mod)
+round(prop.table(table(data$ep011_mod)),2)
+```
+
+####Ploteo
+
+```{r}
+data$ep011_mod <- as.factor(data$ep011_mod)
+```
+
+```{r}
+plot_var(98,59,"CASP vs Term of main job",T,0)
+```
+### Variable 4: working hours per week
+```{r}
+which(names(data) == "ep013_mod")
+```
+
+#### Descriptivo
+76% NAs
+```{r}
+unique(data$ep013_mod)
+round(prop.table(table(data$ep013_mod)),2)
+```
+
+####Ploteo
+
+```{r}
+data$ep013_mod <- as.numeric(data$ep013_mod)
+is.numeric(data$ep013_mod)
+```
+
+```{r}
+ggplot(data, aes(x = ep013_mod)) + geom_histogram()
+```
+### Variable 5: Satisfaction with (main) job
+```{r}
+which(names(data) == "ep026_mod")
+```
+
+#### Descriptivo
+76% NAs
+```{r}
+unique(data$ep026_mod)
+round(prop.table(table(data$ep026_mod)),2)
+```
+
+####Ploteo
+
+```{r}
+data$ep026_mod <- as.factor(data$ep026_mod)
+
+```
+
+```{r}
+plot_var(100,59,"CASP vs Satisfaction with main job",T,0)
+```
+### Variable 6: Look for early retirement in (main) job
+```{r}
+which(names(data) == "ep036_mod")
+```
+
+#### Descriptivo
+76%NAs
+```{r}
+unique(data$ep036_mod)
+round(prop.table(table(data$ep036_mod)),2)
+```
+
+####Ploteo
+
+```{r}
+data$ep036_mod <- as.factor(data$ep036_mod)
+```
+
+```{r}
+plot_var(101,59,"CASP vs Satisfaction with main job",T,0)
+```
+
+# Household
+
+## Variable 1: Make ends meet
+
+```{r}
+which(names(data) == "co007_")
+```
+
+#### Descriptivo
+4 niveles en función de dificultad para llegar a fin de mes (1, mucha - 4 fácilmente) + dos niveles de valores ausentes.
+```{r}
+unique(data$co007_)
+round(prop.table(table(data$co007_)),2)
+```
+El 60% de los encuestados refieren llegar a fin de mes fácilmente, frente al 40% restante, que experimenta dificultades moderadas o severas.
+
+####Ploteo
+
+```{r}
+data$co007_ <- as.factor(data$co007_)
+```
+
+```{r}
+plot_var(102,59,"CASP vs Make ends meet",T,0)
+```
+## Variable 2: Household net income, imputed (thinc_m)
+
+```{r}
+which(names(data) == "thinc_m")
+```
+
+#### Descriptivo
+¿Cuántos niveles tiene?
+
+
+####Ploteo
+
+```{r}
+data$income_pct_w7 <- as.factor(data$income_pct_w7)
+
+```
+
+```{r}
+plot_var(109,59,"CASP vs Household net income, imputed",T,0)
+```
+# PARTE 2. 
+KOLMOGOROV PROVIENEN DE LA MISMA DISTRIBUCIÓN CONJUNTA, ES DECIR, SE COMPORTAN DE LA MISMA MANERA, TIENEN LA MISMA DISTRIBUCIÓN
+
+T TEST LAS MEDIAS SON ESTADÍSTICAMENTE IGUALES. PVALUE PEQUEÑO CONCLUYO QUE LAS MEDIAS SON ESTADÍSTICAMENTE DIFERENTES.
+
+Verificación de diferencias por género.
+
+## Variable objetivo: current job situation (ep005_) por sexo
+```{r}
+casp_female <- data %>% filter(female == 1)
+casp_male <- data %>% filter(female == 0)
+
+ks.test(casp_female$casp,casp_male$casp)
+```
+p-value < 0.05; 
+
+```{r}
+t.test(casp_female$casp,casp_male$casp)
+```
+Las medias son estadísticamente diferentes.
+
+## Variable explicativa 1: current job situation (ep005_)
+```{r}
+unique(data$ep005_)
+```
+### Level 1
+
+```{r}
+ep005_1_female <- data %>% filter(female == 1) %>% filter(ep005_ == 1)
+ep005_1_male <- data %>% filter(female == 0) %>% filter(ep005_ == 1)
+
+ks.test(ep005_1_female$casp,ep005_1_male$casp)
+```
+Rechazo hipótesis nula (igualdad) porque el p-valor está por debajo de mi nivel de significación. Por lo tanto, el sexo SÍ influye
+### Level 2
+```{r}
+ep005_2_female <- data %>% filter(female == 1) %>% filter(ep005_ == 2)
+ep005_2_male <- data %>% filter(female == 0) %>% filter(ep005_ == 2)
+
+ks.test(ep005_2_female$casp,ep005_2_male$casp)
+```
+Rechazo hipótesis nula (igualdad) porque el p-valor está por debajo de mi nivel de significación. Por lo tanto, el sexo SÍ influye
+
+### Level 3.
+```{r}
+ep005_3_female <- data %>% filter(female == 1) %>% filter(ep005_ == 3)
+ep005_3_male <- data %>% filter(female == 0) %>% filter(ep005_ == 3)
+
+ks.test(ep005_3_female$casp,ep005_3_male$casp)
+```
+No rechazo
+
+### Level 4.
+```{r}
+ep005_4_female <- data %>% filter(female == 1) %>% filter(ep005_ == 4)
+ep005_4_male <- data %>% filter(female == 0) %>% filter(ep005_ == 4)
+
+ks.test(ep005_4_female$casp,ep005_4_male$casp)
+```
+Sí influye
+```{r}
+t.test(ep005_4_female$casp,ep005_4_male$casp)
+```
+Las mujeres tienen peor calidad de vida.
+
+### Level 5.
+```{r}
+ep005_5_female <- data %>% filter(female == 1) %>% filter(ep005_ == 5)
+ep005_5_male <- data %>% filter(female == 0) %>% filter(ep005_ == 5)
+
+ks.test(ep005_5_female$casp,ep005_5_male$casp)
+```
+NO DIFERENCIA Amosde casa
+
+### Level 97.
+```{r}
+ep005_97_female <- data %>% filter(female == 1) %>% filter(ep005_ == 97)
+ep005_97_male <- data %>% filter(female == 0) %>% filter(ep005_ == 97)
+
+ks.test(ep005_97_female$casp,ep005_97_male$casp)
+```
+
+Sí diferencia en Other
+
+
+### Level -12.
+```{r}
+ep005_12_female <- data %>% filter(female == 1) %>% filter(ep005_ == -12)
+ep005_12_male <- data %>% filter(female == 0) %>% filter(ep005_ == -12)
+
+ks.test(ep005_12_female$casp,ep005_12_male$casp)
+```
+NO DIFERENCIA refusal
+
+### Level -15
+
+```{r}
+ep005_15_female <- data %>% filter(female == 1) %>% filter(ep005_ == -15)
+ep005_15_male <- data %>% filter(female == 0) %>% filter(ep005_ == -15)
+
+ks.test(ep005_15_female$casp,ep005_15_male$casp)
+```
+
+nO DIFERENCIA
+
+## Variable explicativa 2: satisfaction with main job
+```{r}
+unique(data$ep026_mod)
+```
+
+### Level 1
+
+```{r}
+ep026_mod_1_female <- data %>% filter(female == 1) %>% filter(ep026_mod == 1)
+ep026_mod_1_male <- data %>% filter(female == 0) %>% filter(ep026_mod == 1)
+
+ks.test(ep026_mod_1_female$casp,ep026_mod_1_male$casp)
+```
+p-valor < 0.05, SÍ influye
+```{r}
+t.test(ep026_mod_1_female$casp,ep026_mod_1_male$casp)
+```
+Sí hay diferencia. Los hombres son más felices
+### Level 2
+
+```{r}
+ep026_mod_2_female <- data %>% filter(female == 1) %>% filter(ep026_mod == 2)
+ep026_mod_2_male <- data %>% filter(female == 0) %>% filter(ep026_mod == 2)
+
+ks.test(ep026_mod_2_female$casp,ep026_mod_2_male$casp)
+```
+p-valor > 0.05, NO influye
+```{r}
+t.test(ep026_mod_2_female$casp,ep026_mod_2_male$casp)
+```
+No hay diferencia significativa
+### Level 3
+```{r}
+ep026_mod_3_female <- data %>% filter(female == 1) %>% filter(ep026_mod == 3)
+ep026_mod_3_male <- data %>% filter(female == 0) %>% filter(ep026_mod == 3)
+
+ks.test(ep026_mod_3_female$casp,ep026_mod_3_male$casp)
+```
+p-valor >0.05 NO influye
+```{r}
+t.test(ep026_mod_3_female$casp,ep026_mod_3_male$casp)
+```
+Sí hay diferencia significativa
+### Level 4
+```{r}
+ep026_mod_4_female <- data %>% filter(female == 1) %>% filter(ep026_mod == 4)
+ep026_mod_4_male <- data %>% filter(female == 0) %>% filter(ep026_mod == 4)
+
+ks.test(ep026_mod_4_female$casp,ep026_mod_4_male$casp)
+```
+p-valor >0.05 NO influye
+```{r}
+t.test(ep026_mod_4_female$casp,ep026_mod_4_male$casp)
+```
+No hay diferencia significativa
+### Level -9
+```{r}
+ep026_mod_9_female <- data %>% filter(female == 1) %>% filter(ep026_mod == -9)
+ep026_mod_9_male <- data %>% filter(female == 0) %>% filter(ep026_mod == -9)
+
+ks.test(ep026_mod_9_female$casp,ep026_mod_9_male$casp)
+```
+p-valor < 0.05, SÍ influye.
+```{r}
+t.test(ep026_mod_9_female$casp,ep026_mod_9_male$casp)
+```
+Sí diferencia. Los hombres tienen en media más CASP
+
+### Level -12.
+```{r}
+ep026_mod_12_female <- data %>% filter(female == 1) %>% filter(ep026_mod == -12)
+ep026_mod_12_male <- data %>% filter(female == 0) %>% filter(ep026_mod == -12)
+
+ks.test(ep026_mod_12_female$casp,ep026_mod_12_male$casp)
+```
+NO DIFERENCIA refusal
+```{r}
+t.test(ep026_mod_12_female$casp,ep026_mod_12_male$casp)
+```
+No hay diferencia
+### Level -15
+
+```{r}
+ep026_mod_15_female <- data %>% filter(female == 1) %>% filter(ep026_mod == -15)
+ep026_mod_15_male <- data %>% filter(female == 0) %>% filter(ep026_mod == -15)
+
+ks.test(ep026_mod_15_female$casp,ep026_mod_15_male$casp)
+```
+
+Sí diferencia
+```{r}
+t.test(ep026_mod_15_female$casp,ep026_mod_15_male$casp)
+```
+Sí hay diferencia. Hombres mejor.
+
+## Variable 3: Make ends meet (co007_)
+```{r}
+unique(data$co007_)
+```
+
+### Level 1
+
+```{r}
+co007_1_female <- data %>% filter(female == 1) %>% filter(co007_ == 1)
+co007_1_male <- data %>% filter(female == 0) %>% filter(co007_ == 1)
+
+ks.test(co007_1_female$casp,co007_1_male$casp)
+```
+p-valor < 0.05, no discrimina por sexo
+### Level 2
+```{r}
+co007_2_female <- data %>% filter(female == 1) %>% filter(co007_ == 2)
+co007_2_male <- data %>% filter(female == 0) %>% filter(co007_ == 2)
+
+ks.test(co007_2_female$casp,co007_2_male$casp)
+```
+p-valor < 0.05, no discrimina por sexo
+
+### Level 3.
+```{r}
+co007_3_female <- data %>% filter(female == 1) %>% filter(co007_ == 3)
+co007_3_male <- data %>% filter(female == 0) %>% filter(co007_ == 3)
+
+ks.test(co007_3_female$casp,co007_3_male$casp)
+```
+p-valor < 0.05, no discrimina por sexo
+
+### Level 4.
+```{r}
+co007_4_female <- data %>% filter(female == 1) %>% filter(co007_ == 4)
+co007_4_male <- data %>% filter(female == 0) %>% filter(co007_ == 4)
+
+ks.test(co007_4_female$casp,co007_4_male$casp)
+```
+p-valor < 0.05 no discrimina
+
+### Level -12.
+```{r}
+co007_12_female <- data %>% filter(female == 1) %>% filter(co007_ == -12)
+co007_12_male <- data %>% filter(female == 0) %>% filter(co007_ == -12)
+
+ks.test(co007_12_female$casp,co007_12_male$casp)
+```
+SÍ DIFERENCIA refusal
+```{r}
+t.test(co007_12_female$casp,co007_12_male$casp)
+```
+
+### Level -15
+
+```{r}
+co007_15_female <- data %>% filter(female == 1) %>% filter(co007_ == -15)
+co007_15_male <- data %>% filter(female == 0) %>% filter(co007_ == -15)
+
+ks.test(co007_15_female$casp,co007_15_male$casp)
+```
+
+NO DIFERENCIA no information
+
+
+## Variable 4: Household net income, imputed (thinc_m)
+### ep013_mod
+```{r}
+cor(data$ep013_mod, data$casp)
+```
+debajo de la media
+```{r}
+media <- mean((data %>% filter(ep013_mod > -1))$ep013_mod)
+cor((data %>% filter(ep013_mod > -1) %>% filter(ep013_mod < media))$ep013_mod, (data %>% filter(ep013_mod > -1) %>% filter(ep013_mod < media))$casp)
+```
+Sobre la media
+```{r}
+cor((data %>% filter(ep013_mod > -1) %>% filter(ep013_mod > media))$ep013_mod, (data %>% filter(ep013_mod > -1) %>% filter(ep013_mod > media))$casp)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Suponiendo una relación lineal, podría hacer la correlación:
+
+```{r}
+skim(data$thinc_m)
+```
+
+1. correlación casp - income
+2. filtra income por sexo y calculo correlación para cada una de ellas con casp
+3. Kolmogorov (h,m)
+
+```{r}
+cor_casp_income <- cor(data$casp,data$thinc_m)
+```
+
+```{r}
+female_casp <- (data %>% filter(female == 1))$casp
+male_casp <- (data %>% filter(female == 0))$casp
+```
+
+
+```{r}
+female_inc <- (data %>% filter(female == 1))$thinc_m
+male_inc <- (data %>% filter(female == 0))$thinc_m
+```
+```{r}
+female_cor <- cor(female_inc,female_casp)
+male_cor <- cor(male_inc,male_casp)
+```
+```{r}
+male_cor
+female_cor
+```
+
+
+

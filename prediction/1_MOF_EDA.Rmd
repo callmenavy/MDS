@@ -1,0 +1,298 @@
+---
+title: "Preliminary Operations"
+author: "Marina Ortin Fernandez"
+date: "18/1/2020"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r}
+setwd('C:/Users/marin/OneDrive/Escritorio/MDS/A_ EXAMENES/ARD/entregas')
+datos <- read.csv2('H1.csv', sep = ',')
+```
+# Librerias
+```{r echo=FALSE}
+library(skimr)
+library(cleandata) #codificacion: ordinal
+library(ggplot2)
+library(dplyr)
+library(corrplot)
+library(mlbench)
+library(caret)
+library(dplyr)
+```
+# Operaciones comunes: EDA
+Las operaciones comunes consistiran en el analisis exploratorio de datos y la limpieza de los mismos para garantizar un resultado optimo de los modelos. Estas operaciones incluiran el analisis de distribucion, deteccion de valores ausentes e identificacion de outliers.
+
+Por otra parte, las operaciones especificas propias de las necesidades de cada asignatura seran tratadas de forma separada. Cabe destacar aqui las transformaciones en objetos xls para series temporales, o la creacion de dummies para la asignatura de Tecnicas de Prediccion, ya que en la asignatura de Agrupacion y Reduccion de la Dimension se utilizara la distancia de Gower, por lo que esta transformacion no sera necesaria.
+
+## EDA
+### Tipos de variables
+Tras la carga inicial de datos, observamos que hay 14 columnas de tipo factor y 17 columnas de tipo numerico.
+
+```{r}
+skim(datos)
+```
+#### Variables categoricas
+
+En este epigrafe analizaremos la distribucion de estas variables y las prepararemos para su conversion en 'dummies'.
+
+##### ADR
+Dado que ADR representa un promedio, transformamos el tipo de dato, de factor a numerico.
+```{r}
+datos$ADR <- as.numeric(datos$ADR)
+```
+```{r}
+ggplot(datos,aes(ADR,fill = IsCanceled)) + geom_density(alpha=0.4)
+```
+
+#### Arrival Date Month
+
+Realizamos un ordinal encoding sobre esta variable.
+
+```{r}
+levels <- c('January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December')
+datos$ArrivalDateMonth = factor(datos$ArrivalDateMonth, order = TRUE , levels)
+x <- as.data.frame(datos$ArrivalDateMonth)
+datos$ArrivalDateMonth <- encode_ordinal(x, levels, none = '', out.int = FALSE, full_print = TRUE)
+datos$ArrivalDateMonth <- as.numeric(unlist(datos$ArrivalDateMonth))
+
+```
+Y representamos graficamente:
+```{r}
+ggplot(datos, aes(ArrivalDateMonth, fill = factor(IsCanceled))) + geom_density(alpha = 0.4) + 
+  theme(axis.text.x = element_text(angle=65, vjust=0.6)) + 
+  labs(title=" Grafico de densidad", 
+       subtitle="Arrival Date Month")
+round(prop.table(table(datos$IsCanceled, datos$ArrivalDateMonth), margin=2),3)*100
+```
+
+Se puede intuir estacionalidad en el comportamiento. Este es un comportamiento habitual en el sector turistico.
+
+##### Meal
+Se puede observar que la opcion mas demandada es Bed + Breakfast.
+```{r}
+ggplot(datos, aes(Meal, fill = factor(IsCanceled))) + geom_bar() + 
+  theme(axis.text.x = element_text(angle=65, vjust=0.6)) + 
+  labs(title="Histogram on Categorical Variable", 
+       subtitle="Meal")
+
+
+```
+##### Agent, Company,Country
+Como se puede observar en la siguiente tabla, el origen de turistas extranjeros esta muy atomizado; en la mayoria de los casos, aparecen menos de 100 personas con la misma nacionalidad. Por lo tanto, se decide prscindir de esta variable, por carecer de poder predictivo, sobre un dataset de estas dimensiones.
+
+Esta circunstancia se repite en las variables Agent y Company, por lo que se decide prescindir de estas.
+```{r}
+table(datos$Country)
+```
+
+```{r}
+round(prop.table(table(datos$Country, datos$IsCanceled), margin=2),3)*100
+round(prop.table(table(datos$IsCanceled, datos$Agent), margin=2),3)*100
+round(prop.table(table(datos$IsCanceled, datos$Company), margin=2),3)*100
+```
+Eliminacion de columnas innecesarias:
+```{r}
+datos <- select(datos,-Agent,-Company,-Country)
+```
+
+##### Market segment
+```{r}
+ggplot(datos, aes(MarketSegment, fill = factor(IsCanceled))) + geom_bar() + 
+  theme(axis.text.x = element_text(angle=65, vjust=0.6)) + 
+  labs(title = "Histogram on Categorical Variable", 
+       subtitle = "MarketSegment")
+round(prop.table(table(datos$IsCanceled, datos$MarketSegment), margin=2),3)*100
+
+```
+##### Distribution Channel
+```{r}
+ggplot(datos, aes(DistributionChannel, fill = factor(IsCanceled))) + geom_bar() + 
+  theme(axis.text.x = element_text(angle=65, vjust=0.6)) + 
+  labs(title = "Histograma", 
+       subtitle = "DistributionChannel")
+round(prop.table(table(datos$IsCanceled, datos$DistributionChannel), margin=2),3)*100
+
+```
+##### ReservedRoomType
+```{r}
+ggplot(datos, aes(ReservedRoomType, fill = factor(IsCanceled))) + geom_bar() + 
+  theme(axis.text.x = element_text(angle=65, vjust=0.6)) + 
+  labs(title = "Histogram on Categorical Variable", 
+       subtitle = "ReservedRoomType")
+round(prop.table(table(datos$IsCanceled, datos$ReservedRoomType), margin=2),3)*100
+```
+
+##### AssignedRoomType
+```{r}
+ggplot(datos, aes(AssignedRoomType, fill = factor(IsCanceled))) + geom_bar() + 
+  theme(axis.text.x = element_text(angle=65, vjust=0.6)) + 
+  labs(title = "Histogram on Categorical Variable", 
+       subtitle = "AssignedRoomType")
+round(prop.table(table(datos$IsCanceled, datos$AssignedRoomType), margin=2),3)*100
+```
+##### DepositType
+```{r}
+ggplot(datos, aes(DepositType, fill = factor(IsCanceled))) + geom_bar() + 
+  theme(axis.text.x = element_text(angle=65, vjust=0.6)) + 
+  labs(title = "Histogram on Categorical Variable", 
+       subtitle = "DepositType")
+round(prop.table(table(datos$IsCanceled, datos$DepositType), margin=2),3)*100
+```
+##### CustomerType
+```{r}
+ggplot(datos, aes(CustomerType, fill = factor(IsCanceled))) + geom_bar() + 
+  theme(axis.text.x = element_text(angle=65, vjust=0.6)) + 
+  labs(title = "Histogram on Categorical Variable", 
+       subtitle = "CustomerType")
+round(prop.table(table(datos$IsCanceled, datos$CustomerType), margin=2),3)*100
+```
+
+### Deteccion de valores ausentes
+No encontramos valores NA en este dataset
+```{r}
+sapply(datos,function(x) sum(is.na(x)))
+```
+##### ReservationStatus y ReservationStatusDate
+Eliminamos estas columnas dado que, al tratarse de informacion recogida a posteriori podria provocar sobreajuste en el modelo predictivo.
+```{r}
+datos <- select(datos,-ReservationStatus,-ReservationStatusDate)
+```
+#### Variables numericas
+
+##### IsCanceled
+Durante la carga de datos, esta variable ha sido cargada como numerica, por lo que corresponde su transformacion a tipo factor. Esta sera nuestra variable objetivo.
+El 72% de las reservas transcurren correctamente, mientras que el 28% restante son canceladas.
+```{r}
+datos$IsCanceled <- as.factor(datos$IsCanceled)
+```
+```{r}
+table(datos$IsCanceled)
+```
+
+##### IsRepeatedGuest
+Esta variable dicotomica se convierte a factor para darle un tratamiento mas adecuado.
+```{r}
+datos$IsRepeatedGuest <- as.factor(datos$IsRepeatedGuest)
+```
+```{r}
+ggplot(datos, aes(IsRepeatedGuest, fill = factor(IsCanceled))) + geom_bar() + 
+  theme(axis.text.x = element_text(angle=65, vjust=0.6)) + 
+  labs(title = "Histogram on Categorical Variable", 
+       subtitle = "IsRepeatedGuest")
+round(prop.table(table(datos$IsCanceled, datos$IsRepeatedGuest), margin=2),3)*100
+```
+
+##### LeadTime
+```{r}
+ggplot(datos,aes(LeadTime,fill = IsCanceled)) + geom_histogram()
+round(prop.table(table(datos$IsCanceled, datos$LeadTime), margin=2),3)*100
+```
+ 
+##### ArrivalDateWeekNumber
+Estacionalidad
+```{r}
+ggplot(datos,aes(ArrivalDateWeekNumber,fill = IsCanceled)) + geom_density(alpha = 0.4) + theme(axis.text.x = element_text(angle=65, vjust=0.6)) + 
+  labs(title="Grafico de  densidad", 
+       subtitle="Arrival Date Week")
+```
+##### ArrivalDateDayOfMonth
+
+```{r}
+ggplot(datos,aes(ArrivalDateDayOfMonth,fill = IsCanceled)) + geom_histogram()
+```
+##### StaysInWeekNights
+
+```{r}
+ggplot(datos,aes(StaysInWeekNights,fill = IsCanceled)) + geom_histogram()
+```
+##### StaysInWeekendNights
+```{r}
+ggplot(datos,aes(StaysInWeekendNights,fill = IsCanceled)) + geom_histogram()
+```
+##### Adults
+```{r}
+ggplot(datos,aes(Adults,fill = IsCanceled)) + geom_histogram()
+```
+##### Children
+```{r}
+ggplot(datos,aes(Children,fill = IsCanceled)) + geom_histogram()
+```
+##### Babies
+```{r}
+ggplot(datos,aes(Babies,fill = IsCanceled)) + geom_histogram()
+```
+##### PreviousCancellations
+```{r}
+ggplot(datos,aes(PreviousCancellations,fill = IsCanceled,)) + geom_histogram(bins =5)
+round(prop.table(table(datos$IsCanceled, datos$PreviousCancellations), margin=2),3)*100
+```
+##### PreviousBookingsNotCanceled
+```{r}
+ggplot(datos,aes(PreviousBookingsNotCanceled,fill = IsCanceled)) + geom_histogram(bins = 5)
+round(prop.table(table(datos$IsCanceled, datos$BookingChanges), margin=2),3)*100
+```
+##### BookingChanges
+```{r}
+ggplot(datos,aes(BookingChanges,fill = IsCanceled)) +  geom_bar()
+round(prop.table(table(datos$IsCanceled, datos$BookingChanges), margin=2),3)*100
+```
+##### DaysInWaitingList
+```{r}
+ggplot(datos,aes(DaysInWaitingList,fill = IsCanceled)) +  geom_density(alpha=0.4)
+```
+##### RequiredCarParkingSpaces
+```{r}
+ggplot(datos,aes(RequiredCarParkingSpaces,fill = IsCanceled)) +  geom_bar()
+```
+##### TotalOfSpecialRequests
+```{r}
+ggplot(datos,aes(TotalOfSpecialRequests,fill = IsCanceled)) +  geom_bar()
+round(prop.table(table(datos$IsCanceled, datos$TotalOfSpecialRequests), margin=2),3)*100
+```
+
+
+
+## Feature Engineering
+
+### Correlacion.
+Definimos una matriz con solo las variables numericas para calcular la matriz de correlacion entre ellas. Como se puede observar, se aprecia una alta correlacion entre ArrivalDateWeekNumber y ArrivalDateMonth. Por otra parte, tambien destaca la correlacion hallada entre StaysInWeekendNights y StaysInWeekNights.
+
+```{r}
+numdata <- select(datos,LeadTime,ArrivalDateYear,ArrivalDateMonth,ArrivalDateWeekNumber,ArrivalDateDayOfMonth,StaysInWeekendNights,StaysInWeekNights,Adults,Children,Babies,PreviousCancellations,PreviousBookingsNotCanceled,BookingChanges,DaysInWaitingList,ADR,RequiredCarParkingSpaces,TotalOfSpecialRequests)
+```
+```{r}
+M <- cor(numdata)
+corrplot(M, method = "circle",type = "upper",tl.cex = 0.6)
+```
+Recurrimos a la libreria Caret para contrastar las conclusiones que hemos obtenido del analisis visual.
+```{r}
+library(caret)
+highlyCorrelated <- findCorrelation(M, cutoff = 0.5)
+print(highlyCorrelated)
+```
+
+Se confirman las conclusiones alcanzadas a traves del analisis del correlograma, y se decide prescindir de las columnas con indice 6 (StaysInWeekNights) e indice 3 (ArrivalDateWeekNumber)
+
+```{r}
+datos <- select(datos, -StaysInWeekNights,-ArrivalDateMonth, -ArrivalDateYear)
+numdata <- select(numdata, -StaysInWeekNights,-ArrivalDateMonth,-ArrivalDateYear)
+```
+```{r}
+M2 <- cor(numdata)
+corrplot(M2, method = "circle",type = "upper")
+
+### Creacion de dummies.
+
+IsCanceled <- datos[,1]
+```
+
+### Creación de dummies
+```{r}
+
+data <- fastDummies::dummy_cols(datos,remove_selected_columns = TRUE)
+data <- cbind(IsCanceled,data)
+data <- select(data,-IsCanceled_0,-IsCanceled_1)
+```
